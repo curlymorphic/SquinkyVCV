@@ -84,6 +84,8 @@ extern void testScale();
 extern void testTriad();
 extern void testMidiSelectionModel();
 extern void testMidiTrackPlayer();
+extern void testSuper();
+extern void testEditCommands4();
 
 #if 0
 #include <sstream>
@@ -108,7 +110,7 @@ static void xx()
 }
 #endif
 
-#define _MIDIONLY
+// #define _MIDIONLY
 
 int main(int argc, char ** argv)
 {
@@ -158,6 +160,8 @@ int main(int argc, char ** argv)
         return 0;
     }
 
+
+
     testAudioMath();
     testRingBuffer();
     testGateTrigger();
@@ -198,6 +202,7 @@ int main(int argc, char ** argv)
     testManagedPool();
     testLookupTable();
     testObjectCache();
+    testEditCommands4();
     testMultiLag();
     testSlew4();   
     testMixHelper();
@@ -231,6 +236,7 @@ int main(int argc, char ** argv)
     //testLowpassFilter();
     testLadder();
     testHighpassFilter();
+    testSuper();
  
 #if 0
     printf("skipping lots of tests\n");

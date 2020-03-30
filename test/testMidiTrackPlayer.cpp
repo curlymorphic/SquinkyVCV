@@ -2,7 +2,9 @@
 #include "MidiSong4.h"
 #include "MidiTrack4Options.h"
 #include "MidiTrackPlayer.h"
+#include "MidiVoiceAssigner.h"
 #include "TestHost2.h"
+#include "TestHost4.h"
 #include "asserts.h"
 
 /**
@@ -38,6 +40,15 @@ static MidiSong4Ptr makeSong3(int trackNum)
     song->addTrack(trackNum, 0, clip0);
     song->addTrack(trackNum, 1, clip1);
     song->addTrack(trackNum, 2, clip2);
+    return song;
+}
+
+static MidiSong4Ptr makeSong4(int trackNum)
+{
+    MidiSong4Ptr song = makeSong3(trackNum);
+    MidiLocker lock(song->lock);
+    MidiTrackPtr clip = MidiTrack::makeTest(MidiTrack::TestContent::eightQNotesCMaj, song->lock);
+    song->addTrack(trackNum, 3, clip);
     return song;
 }
 
@@ -84,7 +95,6 @@ static void testCanCall()
 
 static void testLoop1()
 {
-    printf("\n----- testLoop1\n");
     std::shared_ptr<IMidiPlayerHost4> host = std::make_shared<TestHost2>();
     MidiSong4Ptr song = makeSong(0);
     MidiTrackPlayer pl(host, 0, song);
@@ -349,24 +359,54 @@ static void testSwitchToPrev()
     pl.updateSampleCount(4);        // a few more process calls
     inputPort.setVoltage(0.f, 1);
     pl.updateSampleCount(4);
+    assertEQ(pl.getNextSectionRequest(), 1);
 
     // play to start of next section (back to 1)
     play(pl, 4 + 8 + .1, quantizationInterval);
     x = pl.getSection();
     assertEQ(x, 1);
-#if 0
-    // cue up a switch to prev section.
-    // should wrap to second
-    inputPort.setVoltage(5.f, 1);     // send a pulse to channel 0
-    pl.updateSampleCount(4);        // a few more process calls
-    inputPort.setVoltage(0.f, 1);
-    pl.updateSampleCount(4);
+}
 
-      // play to start of next section
-    play(pl, 4 + 4 + 8 + .1, quantizationInterval);
-    x = pl.getSection();
-    assertEQ(x, 3);
-#endif
+static void testSwitchToAbs()
+{
+     // make a song with three sections
+    std::shared_ptr<TestHost2> host = std::make_shared<TestHost2>();
+    MidiSong4Ptr song = makeSong4(0);
+    MidiTrackPlayer pl(host, 0, song);
+
+    Input inputPort;
+    Param param;
+    pl.setPorts(&inputPort, &param);
+
+    {
+        // set all section to play forever
+        auto options0 = song->getOptions(0, 0);
+        options0->repeatCount = 0;
+        auto options1 = song->getOptions(0, 1);
+        options1->repeatCount = 0;
+        auto options2 = song->getOptions(0, 2);
+        options2->repeatCount = 0;
+        auto options3 = song->getOptions(0, 3);
+        options3->repeatCount = 0;
+    }
+    const float quantizationInterval = .01f;
+    pl.setRunningStatus(true);      // start it.
+    pl.step();
+
+    // play to middle of first bar
+    play(pl, 2, quantizationInterval);
+    int x = pl.getSection();
+    assertEQ(x, 1);
+
+    inputPort.setVoltage(0.f, 1);
+    inputPort.setVoltage(0.f, 0);
+    // cue up a switch to third section.
+    for (int i = 0; i < MidiSong4::numSectionsPerTrack; ++i) {
+        inputPort.setVoltage(float(i+1), 2);
+        pl.updateSampleCount(4);
+        assertEQ(pl.getNextSectionRequest(), i+1);
+    }
+
 }
 
 
@@ -504,13 +544,12 @@ static void testHardResetOrig()
 
     // stop, and reset
     pl.setRunningStatus(false);
-    pl.reset(true);         // set back to section 1
+    pl.reset(false, true);         // set back to section 1
 
     // could assert the next is now 1??
     pl.playOnce(.2, quantizationInterval);
     assertEQ(pl.getSection(), 1);
 }
-
 
 static void testHardReset()
 {
@@ -543,16 +582,13 @@ static void testHardReset()
 
     // stop, and reset
     pl.setRunningStatus(false);
-    pl.reset(true);         // set back to section 1
+    pl.reset(false, true);         // set back to section 1
     pl.step();
 
     // could assert the next is now 1??
     pl.playOnce(.2, quantizationInterval);
     assertEQ(pl.getSection(), 1);
 }
-
-
-// static void play(MidiTrackPlayer& pl, double time, float quantize)
 
 static void testPlayThenReset()
 {
@@ -580,7 +616,7 @@ static void testPlayThenReset()
     // reset
     pl.setRunningStatus(false);
     pl.step();
-    pl.reset(true);
+    pl.reset(false, true);
     pl.step();
     pl.setRunningStatus(true);
     pl.step();
@@ -592,9 +628,7 @@ static void testPlayThenReset()
     assertEQ(pl.getSection(), 1);
     play(pl, 4.1, quantizationInterval);
     assertEQ(pl.getSection(), 2);
-
 }
-
 
 static void testPlayThenResetSeek()
 {
@@ -623,7 +657,7 @@ static void testPlayThenResetSeek()
     // reset and request last section
     pl.setRunningStatus(false);
     pl.step();
-    pl.reset(true);
+    pl.reset(false, true);
     pl.setNextSectionRequest(4);
     pl.setRunningStatus(true);                  // will put startup req in queue.
 
@@ -652,7 +686,6 @@ extern float lastTime;
 static void testPlayPauseSeek()
 {
     lastTime = -100;
-    printf("\n--- testPlayPauseSeek\n");
     // make a song with four sections 1/2/2/2
     std::shared_ptr<TestHost2> host = std::make_shared<TestHost2>();
     MidiSong4Ptr song = makeTestSong4(0);
@@ -670,11 +703,9 @@ static void testPlayPauseSeek()
     play(pl, 3, quantizationInterval);
     assertEQ(pl.getSection(), 1);
 
-    printf("test will pause and seek\n");
     pl.setRunningStatus(false);         // pause
     pl.setNextSectionRequest(4);        // goto last section
 
-    printf("test will resume\n");
     lastTime = -100;
 
     pl.setRunningStatus(true);          // resume
@@ -689,8 +720,56 @@ static void testPlayPauseSeek()
 
     play(pl, 8.1, quantizationInterval); // play most (this section 2 bars)
     assertEQ(pl.getSection(), 1);       // should be playing requested section
+}
 
-  //  assert(false);
+/*
+/*
+    durations = 1,2,2,2
+
+MidiSong4Ptr makeTestSong4(int trackNum)
+{
+    MidiSong4Ptr song = std::make_shared<MidiSong4>();
+    MidiLocker lock(song->lock);
+    MidiTrackPtr clip0 = MidiTrack::makeTest(MidiTrack::TestContent::oneQ1_75, song->lock);
+    MidiTrackPtr clip1 = MidiTrack::makeTest(MidiTrack::TestContent::eightQNotesCMaj, song->lock);
+*/
+
+
+static void testLockGates()
+{
+    // make a song with four sections 1/2/2/2
+    std::shared_ptr<TestHost4> host = std::make_shared<TestHost4>();
+    MidiSong4Ptr song = makeTestSong4(0);
+    MidiTrackPlayer pl(host, 0, song);
+    pl.setNumVoices(4);
+
+    const float quantizationInterval = .01f;
+    pl.setRunningStatus(true);          // start it.
+    pl.step();
+    
+    // first reserve voice 0  for test
+    // This simulates a previous section playing a note on vx 0
+    MidiVoice* vx = pl._getVoiceAssigner().getNext(-3);     // first reserve a voice for test,
+                                                            // but let it end before irst note in seq
+    vx->playNote(-3, 0, .5);
+    assert(host->onlyOneGate(0));
+    
+    // to note in bar 1.
+    // since we already used voice 0, it will be in voice 1
+    play(pl, 1.1f, quantizationInterval);
+    assert(host->onlyOneGate(1));
+
+    pl.reset(false, false);
+    pl.resetAllVoices(true);
+    pl.step();
+
+    // verify reset cleared gates
+    assertEQ(host->numGates(), 0);
+
+    play(pl, 1.2f, quantizationInterval);
+
+    // verify that we start at 0 now (after reset, can be different voices)
+    assert(host->onlyOneGate(0));
 }
 
 void testMidiTrackPlayer()
@@ -702,6 +781,7 @@ void testMidiTrackPlayer()
     testSwitchToNext2();
     testSwitchToNextThenVamp();
     testSwitchToPrev();
+    testSwitchToAbs();
     testRepetition();
     testRandomSwitch();
     testMissingSection();
@@ -709,4 +789,5 @@ void testMidiTrackPlayer()
     testPlayThenReset();
     testPlayThenResetSeek();
     testPlayPauseSeek();
+    testLockGates();
 }

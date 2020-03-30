@@ -4,6 +4,7 @@
 #include "MidiTrack.h"
 #include "MidiVoice.h"
 #include "MidiVoiceAssigner.h"
+#include "SqPort.h"
 
 #include <memory>
 
@@ -13,41 +14,21 @@ class MidiTrack;
 
 // #define _MLOG
 
-/**
- * This awful hack is so that both the real plugin and
- * the unit tests can pass this "Output" struct around
- */
-#ifdef __PLUGIN
-namespace rack {
-namespace engine {
-struct Input;
-struct Param;
-}
-}  // namespace rack
-#else
-#include "TestComposite.h"
-#endif
 
 /**
  * input port usage
  * 
  * 0 = gate: goto next section
  * 1 = gate: goto prev section
- * 2 = cv: set section number
+ * 2 = [cv: set section number]
+ * 
+ * won't do:
  * 3 = transpose
  * 4 =play clip 2x/3x/4x... faster (CV)
  */
 
 class MidiTrackPlayer {
 public:
-#ifdef __PLUGIN
-    using Param = rack::engine::Param;
-    using Input = rack::engine::Input;
-#else
-    using Input = ::Input;
-    using Param = ::Param;
-#endif
-
     MidiTrackPlayer(std::shared_ptr<IMidiPlayerHost4> host, int trackIndex, std::shared_ptr<MidiSong4> song);
     void setSong(std::shared_ptr<MidiSong4> newSong, int trackIndex);
     void resetAllVoices(bool clearGates);
@@ -63,7 +44,7 @@ public:
      * Gives us a chance to do some work before playOnce gets called again.
      */
     void step();
-    void reset(bool resetSectionIndex);
+    void reset(bool resetGates, bool resetSectionIndex);
     void setNumVoices(int numVoices);
     void setSampleCountForRetrigger(int);
     void updateSampleCount(int numElapsed);
@@ -82,7 +63,7 @@ public:
     void setRunningStatus(bool running);
     bool _getRunningStatus() const;
 
-    void setPorts(Input* cvInput, Param* triggerImmediate) {
+    void setPorts(SqInput* cvInput, SqParam* triggerImmediate) {
         input = cvInput;
         immediateParam = triggerImmediate;
     }
@@ -91,6 +72,11 @@ public:
      * Returns the count in counting up the repeats.
      */
     int getCurrentRepetition();
+
+    class MidiVoiceAssigner& _getVoiceAssigner()
+    {
+        return voiceAssigner;
+    }
 
 private:
     
@@ -115,7 +101,7 @@ private:
     /**
      * VCV Input port for the CV input for track
      */
-    Input* input = nullptr;
+    SqInput* input = nullptr;
     
     /**
      * Schmidt triggers for various CV input channels
@@ -123,7 +109,7 @@ private:
     GateTrigger nextSectionTrigger;
     GateTrigger prevSectionTrigger;
 
-    Param* immediateParam = nullptr;        // not imp yet
+    SqParam* immediateParam = nullptr;        // not imp yet
 
     /**
      * This is the song UI sets directly and uses for UI purposes.
@@ -161,7 +147,11 @@ private:
     void setupToPlayCommon();
     void onEndOfTrack();
     void pollForCVChange();
-    void serviceEventQueue();
+
+    /**
+     * returns true if clock was reset
+     */
+    bool serviceEventQueue();
     void setSongFromQueue(std::shared_ptr<MidiSong4>);
 
     /**
@@ -178,6 +168,8 @@ private:
      *      Will return 0 if there are no playable sections.
      */
     static int validateSectionRequest(int section, std::shared_ptr<MidiSong4> song, int trackNumber);
+
+    void dumpCurEvent(const char*);
 
     /**
      * variables only used by playback code.
@@ -251,6 +243,7 @@ private:
 
         bool reset = false;
         bool resetSections = false;
+        bool resetGates = false;
         bool startupTriggered = false;
     };
 

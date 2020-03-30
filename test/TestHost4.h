@@ -44,8 +44,10 @@ public:
     }
     void setGate(int track, int voice, bool g) override
     {
-       // assert(track == 0);     // just for now!
-       trackActive[track] = true;
+
+        if (g) {
+            trackActive[track] = true;  // gate off doesn't make a track active
+        }
 #ifdef _MLOG
         printf("test host setGate(%d) -> %d\n", voice, g);
 #endif
@@ -82,6 +84,34 @@ public:
 
     int lockConflicts = 0;
     int numClockResets = 0;
+
+    int numGates() const
+    {
+        int ret = 0;
+        for (int i=0; i<16; ++i) {
+            if (gateState[i]) {
+                ++ret;
+            }
+        }
+        return ret;
+    }
+
+    bool onlyOneGate(int channel) const
+    {
+        if (numGates() != 1) {
+            return false;
+        }
+
+        for (int i=0; i<16; ++i) {
+            if (gateState[i]) {
+                if (i != channel) {
+                    return false;
+                }
+            }
+        }
+        return true;
+
+    }
 
     std::vector<bool> gateState = {
         false, false, false, false,
